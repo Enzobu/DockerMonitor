@@ -1,0 +1,117 @@
+import pystray
+from pystray import MenuItem as item
+from PIL import Image
+import os
+import json
+import subprocess
+
+# Chemin vers le fichier de configuration
+config_path = "/home/enzo/Dev/config.json"
+icon_path = "/opt/dockerExtension/icon.png"
+icon_start_path = "/opt/dockerExtension/iconStart.png"
+
+# Fonction pour lire la configuration
+def load_config():
+    if not os.path.exists(config_path):
+        print(f"Fichier de configuration introuvable : {config_path}")
+        exit(1)
+    with open(config_path, 'r') as file:
+        return json.load(file)
+
+# Fonction pour charger l'icône de la barre d'état en fonction de l'état des projets
+def create_image(is_active=False):
+    if is_active:
+        return Image.open(icon_start_path)  # Icône verte lorsque des projets sont démarrés
+    return Image.open(icon_path)  # Icône normale lorsqu'aucun projet n'est démarré
+
+# Fonction de démarrage pour chaque projet
+def start_project(project_name):
+    config = load_config()
+    project = next((p for p in config['projects'] if p['name'] == project_name), None)
+    
+    if project:
+        start_script = project['start_script']
+        if os.path.exists(start_script):
+            print(f"Démarrage du projet : {project_name}")
+            subprocess.run([start_script], check=True)
+            return True  # Indiquer que le projet a été démarré
+    return False  # Si le projet n'a pas pu être démarré
+
+# Fonction d'arrêt pour chaque projet
+def stop_project(project_name):
+    config = load_config()
+    project = next((p for p in config['projects'] if p['name'] == project_name), None)
+    
+    if project:
+        stop_script = project['stop_script']
+        if os.path.exists(stop_script):
+            print(f"Arrêt du projet : {project_name}")
+            subprocess.run([stop_script], check=True)
+            return True  # Indiquer que le projet a été arrêté
+    return False  # Si le projet n'a pas pu être arrêté
+
+# Liste des projets actifs
+active_projects = []
+
+# Fonctions spécifiques pour démarrer et arrêter chaque projet
+def start_gmao(icon, item):
+    global active_projects
+    if start_project("GMAO"):
+        active_projects.append("GMAO")
+        update_menu_and_icon()
+
+def stop_gmao(icon, item):
+    global active_projects
+    if stop_project("GMAO"):
+        active_projects.remove("GMAO")
+        update_menu_and_icon()
+
+def start_bibliotheque_musicale(icon, item):
+    global active_projects
+    if start_project("bibliothèque_musicale"):
+        active_projects.append("bibliothèque_musicale")
+        update_menu_and_icon()
+
+def stop_bibliotheque_musicale(icon, item):
+    global active_projects
+    if stop_project("bibliothèque_musicale"):
+        active_projects.remove("bibliothèque_musicale")
+        update_menu_and_icon()
+
+# Fonction pour quitter l'application et arrêter tous les projets
+def quit_program(icon, item):
+    global active_projects
+    print("Fermeture de l'application.")
+    for project_name in active_projects:
+        stop_project(project_name)  # Arrêter tous les projets avant de quitter
+    icon.stop()
+
+# Fonction pour mettre à jour l'icône et le menu
+def update_menu_and_icon():
+    global icon
+    is_active = bool(active_projects)
+    icon.icon = create_image(is_active)  # Modifier l'icône en fonction des projets actifs
+
+    # Créer le menu avec les actions de démarrage/arrêt pour chaque projet
+    config = load_config()
+    menu = [item('Quitter', quit_program)]  # "Quitter" en haut de la liste
+
+    for project in config['projects']:
+        project_name = project['name']
+        if project_name in active_projects:
+            menu.append(item(f"Stop {project_name}", stop_gmao if project_name == "GMAO" else stop_bibliotheque_musicale))
+        else:
+            menu.append(item(f"Start {project_name}", start_gmao if project_name == "GMAO" else start_bibliotheque_musicale))
+
+    icon.menu = pystray.Menu(*menu)
+
+# Fonction pour démarrer l'icône et afficher le menu
+def start_icon():
+    global icon
+    image = create_image(is_active=False)  # Initialiser avec l'icône de base
+    icon = pystray.Icon("Docker Extension", image, "Docker Projects", menu=pystray.Menu())
+    update_menu_and_icon()  # Mettre à jour l'icône et le menu au démarrage
+    icon.run()  # Lancer l'icône et afficher le menu
+
+if __name__ == "__main__":
+    start_icon()

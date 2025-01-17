@@ -1,0 +1,134 @@
+import sys
+import subprocess
+from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
+from PyQt5.QtGui import QIcon
+import os
+import json
+
+# Chemins vers les fichiers de configuration et les icônes
+config_path = "/home/enzo/Dev/config.json"
+icon_path = "/opt/dockerExtension/icon.png"  # Icône de base pour l'application
+icon_active_path = "/opt/dockerExtension/iconStart.png"  # Icône verte pour l'application active
+icon_project_active_path = "/opt/dockerExtension/icon_active.png"  # Icône verte pour un projet actif
+icon_project_inactive_path = "/opt/dockerExtension/icon_inactive.png"  # Icône rouge pour un projet inactif
+
+# Fonction pour lire la configuration
+def load_config():
+    if not os.path.exists(config_path):
+        print(f"Fichier de configuration introuvable : {config_path}")
+        exit(1)
+    with open(config_path, 'r') as file:
+        return json.load(file)
+
+# Fonction pour charger l'icône principale
+def create_image(is_active=False):
+    return QIcon(icon_active_path if is_active else icon_path)
+
+# Fonction pour charger l'icône d'état du projet (verte ou rouge)
+def get_project_icon(is_active=False):
+    return QIcon(icon_project_active_path if is_active else icon_project_inactive_path)
+
+# Fonction de démarrage pour chaque projet
+def start_project(project_name):
+    config = load_config()
+    project = next((p for p in config['projects'] if p['name'] == project_name), None)
+    if project:
+        start_script = project['start_script']
+        if os.path.exists(start_script):
+            print(f"Démarrage du projet : {project_name}")
+            subprocess.run([start_script], check=True)
+            return True
+    return False
+
+# Fonction d'arrêt pour chaque projet
+def stop_project(project_name):
+    config = load_config()
+    project = next((p for p in config['projects'] if p['name'] == project_name), None)
+    if project:
+        stop_script = project['stop_script']
+        if os.path.exists(stop_script):
+            print(f"Arrêt du projet : {project_name}")
+            subprocess.run([stop_script], check=True)
+            return True
+    return False
+
+# Liste des projets actifs
+active_projects = []
+
+# Fonction pour quitter l'application et arrêter tous les projets
+def quit_program():
+    global active_projects
+    print("Fermeture de l'application.")
+    for project_name in active_projects:
+        stop_project(project_name)
+    QApplication.quit()
+
+# Fonction pour mettre à jour le menu et l'icône
+def update_menu_and_icon(tray_icon, menu):
+    global active_projects
+    config = load_config()
+
+    # Déterminer l'état général de l'application
+    is_any_project_active = bool(active_projects)
+    tray_icon.setIcon(create_image(is_any_project_active))
+
+    # Effacer le menu existant
+    menu.clear()
+
+    # Ajouter une action Quitter
+    quit_action = QAction("Quitter", tray_icon)
+    quit_action.triggered.connect(quit_program)
+    menu.addAction(quit_action)
+
+    # Ajouter les actions pour démarrer/arrêter les projets
+    for project in config['projects']:
+        project_name = project['name']
+        is_active = project_name in active_projects
+        project_icon = get_project_icon(is_active)
+        action_text = f"Stop {project_name}" if is_active else f"Start {project_name}"
+
+        # Créer l'action pour démarrer/arrêter un projet
+        project_action = QAction(project_icon, action_text, tray_icon)
+        if is_active:
+            project_action.triggered.connect(
+                lambda checked, name=project_name: stop_and_update(name, tray_icon, menu)
+            )
+        else:
+            project_action.triggered.connect(
+                lambda checked, name=project_name: start_and_update(name, tray_icon, menu)
+            )
+
+        menu.addAction(project_action)
+
+# Fonction pour démarrer un projet et mettre à jour l'état
+def start_and_update(project_name, tray_icon, menu):
+    global active_projects
+    if start_project(project_name):
+        active_projects.append(project_name)
+        update_menu_and_icon(tray_icon, menu)
+
+# Fonction pour arrêter un projet et mettre à jour l'état
+def stop_and_update(project_name, tray_icon, menu):
+    global active_projects
+    if stop_project(project_name):
+        active_projects.remove(project_name)
+        update_menu_and_icon(tray_icon, menu)
+
+# Fonction pour initialiser l'icône de la barre d'état
+def start_icon():
+    app = QApplication(sys.argv)
+    tray_icon = QSystemTrayIcon(create_image(False), app)
+    tray_icon.setToolTip("Gestion des projets Docker")
+
+    # Créer le menu
+    menu = QMenu()
+    tray_icon.setContextMenu(menu)
+
+    # Mettre à jour le menu au démarrage
+    update_menu_and_icon(tray_icon, menu)
+    tray_icon.show()
+
+    sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    start_icon()
